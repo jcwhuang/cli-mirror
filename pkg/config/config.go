@@ -131,6 +131,7 @@ type (
 		Functions    FunctionConfig `toml:"functions"`
 		Analytics    analytics      `toml:"analytics"`
 		Experimental experimental   `toml:"experimental"`
+		DynamicEnv   dynamic_env    `toml:"dynamic_env" mapstructure:"dynamic_env"`
 	}
 
 	config struct {

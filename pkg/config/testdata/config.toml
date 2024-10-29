@@ -242,3 +242,12 @@ enabled = true
 
 [remotes.staging.storage.buckets.images]
 allowed_mime_types = ["image/png"]
+
+
+[dynamic_env.vault]
+access_key = "abcdefg"
+env_vars = [
+    "some-id:SOME_SECRET",
+    "some\\:id-with-double-dot:SOME_SECRET2",
+    "some-id:SOME_SECRE:T",
+]
