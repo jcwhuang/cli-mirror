@@ -1,7 +1,10 @@
 package config
 
 import (
+	"context"
 	"strings"
+
+	"github.com/jackc/pgx/v4"
 )
 
 type structuredEnv struct {
@@ -62,6 +65,10 @@ func getEnvVars(EnvVars []string) []structuredEnv {
 	return result
 }
 
+// func (d *dynamic_env) Fetch(ctx context.Context) (map[string]string, error) {
+// 	return d.Vault.fetch(ctx)
+// }
+
 func (d *dynamic_env) validate() error {
 	if err := d.Vault.validate(); err != nil {
 		return err
@@ -75,4 +82,47 @@ func (v *vaultEnvProvider) validate() error {
 	}
 	v.StructuredEnvVars = getEnvVars(v.EnvVars)
 	return nil
+}
+
+func (v *vaultEnvProvider) Fetch(ctx context.Context, conn *pgx.Conn) (map[string]string, error) {
+	if v == nil {
+		return map[string]string{}, nil
+	}
+
+	result := make(map[string]string, len(v.StructuredEnvVars))
+
+	// Build list of remote names to query
+	remoteNames := make([]string, len(v.StructuredEnvVars))
+	for i, envVar := range v.StructuredEnvVars {
+		remoteNames[i] = envVar.RemoteName
+	}
+
+	// Query vault for all secrets in one batch
+	rows, err := conn.Query(ctx, `SELECT name, decrypted_secret FROM vault.decrypted_secrets WHERE name = ANY($1)`, remoteNames)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	// Build map of remote name -> decrypted secret
+	secrets := make(map[string]string)
+	for rows.Next() {
+		var name, secret string
+		if err := rows.Scan(&name, &secret); err != nil {
+			return nil, err
+		}
+		secrets[name] = secret
+	}
+
+	// Map remote secrets to local env var names
+	for _, envVar := range v.StructuredEnvVars {
+		if secret, ok := secrets[envVar.RemoteName]; ok {
+			result[envVar.LocalName] = secret
+		} else {
+			// Secret not found in vault
+			result[envVar.LocalName] = ""
+		}
+	}
+
+	return result, nil
 }

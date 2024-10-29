@@ -1,9 +1,11 @@
 package config
 
 import (
+	"context"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/supabase/cli/pkg/pgtest"
 )
 
 func TestGetEnvVars(t *testing.T) {
@@ -99,5 +101,74 @@ func TestDynamicEnvValidate(t *testing.T) {
 		err := config.validate()
 		assert.NoError(t, err)
 	})
+}
+func TestVaultEnvProviderFetch(t *testing.T) {
+	t.Run("fetches secrets from vault", func(t *testing.T) {
+		ctx := context.Background()
 
+		provider := &vaultEnvProvider{
+			EnvVars: []string{
+				"remote:LOCAL",
+				"another:LOCAL_NAME",
+			},
+		}
+		err := provider.validate()
+		assert.NoError(t, err)
+
+		// Setup mock postgres
+		conn := pgtest.NewConn()
+		defer conn.Close(t)
+
+		conn.Query(
+			"SELECT name, decrypted_secret FROM vault.decrypted_secrets WHERE name = ANY($1)",
+			[]string{"remote", "another"},
+		).Reply("SELECT 2",
+			[]interface{}{"remote", "secret1"},
+			[]interface{}{"another", "secret2"},
+		)
+
+		result, err := provider.Fetch(ctx, conn.MockClient(t))
+		assert.NoError(t, err)
+		assert.Equal(t, map[string]string{
+			"LOCAL":      "secret1",
+			"LOCAL_NAME": "secret2",
+		}, result)
+	})
+
+	t.Run("handles missing secrets", func(t *testing.T) {
+		ctx := context.Background()
+		provider := &vaultEnvProvider{
+			EnvVars: []string{
+				"remote:LOCAL",
+				"missing:OTHER",
+			},
+		}
+		err := provider.validate()
+		assert.NoError(t, err)
+
+		// Setup mock postgres
+		conn := pgtest.NewConn()
+		t.Cleanup(func() { conn.Close(t) })
+
+		conn.Query(
+			"SELECT name, decrypted_secret FROM vault.decrypted_secrets WHERE name = ANY($1)",
+			[]string{"remote", "missing"},
+		).Reply("SELECT 1", []interface{}{"remote", "secret1"})
+
+		result, err := provider.Fetch(ctx, conn.MockClient(t))
+		assert.NoError(t, err)
+		assert.Equal(t, map[string]string{
+			"LOCAL": "secret1",
+			"OTHER": "", // Missing secret returns empty string
+		}, result)
+	})
+
+	t.Run("nil provider returns empty map", func(t *testing.T) {
+		ctx := context.Background()
+		var provider *vaultEnvProvider
+
+		result, err := provider.Fetch(ctx, nil)
+		assert.NoError(t, err)
+		assert.Equal(t, map[string]string{}, result)
+	})
 }
