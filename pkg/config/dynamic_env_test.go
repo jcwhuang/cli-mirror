@@ -78,7 +78,6 @@ func TestGetEnvVars(t *testing.T) {
 		assert.Equal(t, 0, len(result))
 	})
 }
-
 func TestDynamicEnvValidate(t *testing.T) {
 	t.Run("valid vault config", func(t *testing.T) {
 		config := &dynamic_env{
