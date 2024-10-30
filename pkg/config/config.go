@@ -167,35 +167,6 @@ type (
 		Pop3Port uint16 `toml:"pop3_port"`
 	}
 
-	storage struct {
-		Enabled             bool                 `toml:"enabled"`
-		Image               string               `toml:"-"`
-		FileSizeLimit       sizeInBytes          `toml:"file_size_limit"`
-		S3Credentials       storageS3Credentials `toml:"-"`
-		ImageTransformation imageTransformation  `toml:"image_transformation"`
-		Buckets             BucketConfig         `toml:"buckets"`
-	}
-
-	BucketConfig map[string]bucket
-
-	bucket struct {
-		Public           *bool       `toml:"public"`
-		FileSizeLimit    sizeInBytes `toml:"file_size_limit"`
-		AllowedMimeTypes []string    `toml:"allowed_mime_types"`
-		ObjectsPath      string      `toml:"objects_path"`
-	}
-
-	imageTransformation struct {
-		Enabled bool   `toml:"enabled"`
-		Image   string `toml:"-"`
-	}
-
-	storageS3Credentials struct {
-		AccessKeyId     string `toml:"-"`
-		SecretAccessKey string `toml:"-"`
-		Region          string `toml:"-"`
-	}
-
 	auth struct {
 		Enabled                bool     `toml:"enabled"`
 		Image                  string   `toml:"-"`
@@ -372,10 +343,10 @@ type (
 	FunctionConfig map[string]function
 
 	function struct {
-		Enabled    *bool  `toml:"enabled"`
+		Enabled    *bool  `toml:"enabled" json:"-"`
 		VerifyJWT  *bool  `toml:"verify_jwt" json:"verifyJWT"`
 		ImportMap  string `toml:"import_map" json:"importMapPath,omitempty"`
-		Entrypoint string `json:"-"`
+		Entrypoint string `toml:"entrypoint" json:"entrypointPath,omitempty"`
 	}
 
 	analytics struct {
@@ -678,6 +649,9 @@ func (c *config) Load(path string, fsys fs.FS) error {
 	for name, bucket := range c.Storage.Buckets {
 		if bucket.FileSizeLimit == 0 {
 			bucket.FileSizeLimit = c.Storage.FileSizeLimit
+		}
+		if len(bucket.ObjectsPath) > 0 && !filepath.IsAbs(bucket.ObjectsPath) {
+			bucket.ObjectsPath = filepath.Join(builder.SupabaseDirPath, bucket.ObjectsPath)
 		}
 		c.Storage.Buckets[name] = bucket
 	}
