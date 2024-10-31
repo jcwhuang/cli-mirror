@@ -585,6 +585,10 @@ func (c *config) Load(path string, fsys fs.FS) error {
 	} else if err := c.loadFromEnv(); err != nil {
 		return err
 	}
+
+	if err := c.DynamicEnv.validate(); err != nil {
+		return err
+	}
 	// Generate JWT tokens
 	if len(c.Auth.AnonKey) == 0 {
 		anonToken := CustomClaims{Role: "anon"}.NewToken()

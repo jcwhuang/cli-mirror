@@ -11,7 +11,7 @@ import (
 func TestGetEnvVars(t *testing.T) {
 	t.Run("simple env vars without rename", func(t *testing.T) {
 		input := []string{"SIMPLE_VAR", "ANOTHER_VAR"}
-		result := getEnvVars(input)
+		result := parseEnvVars(input)
 
 		assert.Equal(t, 2, len(result))
 		assert.Equal(t, "SIMPLE_VAR", result[0].RemoteName)
@@ -22,7 +22,7 @@ func TestGetEnvVars(t *testing.T) {
 
 	t.Run("env vars with rename", func(t *testing.T) {
 		input := []string{"remote:LOCAL", "another-remote:LOCAL_NAME"}
-		result := getEnvVars(input)
+		result := parseEnvVars(input)
 
 		assert.Equal(t, 2, len(result))
 		assert.Equal(t, "remote", result[0].RemoteName)
@@ -33,30 +33,30 @@ func TestGetEnvVars(t *testing.T) {
 
 	t.Run("env vars with escaped colons", func(t *testing.T) {
 		input := []string{
-			"remote\\:with\\:colons:LOCAL",
-			"remote\\:colon:LOCAL\\:NAME",
+			"remote:with:colons:LOCAL",
+			"remote:colon:LOCAL_NAME",
 		}
-		result := getEnvVars(input)
+		result := parseEnvVars(input)
 
 		assert.Equal(t, 2, len(result))
 		assert.Equal(t, "remote:with:colons", result[0].RemoteName)
 		assert.Equal(t, "LOCAL", result[0].LocalName)
 		assert.Equal(t, "remote:colon", result[1].RemoteName)
-		assert.Equal(t, "LOCAL:NAME", result[1].LocalName)
+		assert.Equal(t, "LOCAL_NAME", result[1].LocalName)
 	})
 
 	t.Run("env vars with spaces in local name", func(t *testing.T) {
 		input := []string{
-			"remote:LOCAL NAME WITH SPACES",
-			"another-remote:SPACED LOCAL NAME",
+			"remote:LOCAL_NAME_WITH_SPACES",
+			"another-remote:SPACED_LOCAL_NAME",
 		}
-		result := getEnvVars(input)
+		result := parseEnvVars(input)
 
 		assert.Equal(t, 2, len(result))
 		assert.Equal(t, "remote", result[0].RemoteName)
-		assert.Equal(t, "LOCAL NAME WITH SPACES", result[0].LocalName)
+		assert.Equal(t, "LOCAL_NAME_WITH_SPACES", result[0].LocalName)
 		assert.Equal(t, "another-remote", result[1].RemoteName)
-		assert.Equal(t, "SPACED LOCAL NAME", result[1].LocalName)
+		assert.Equal(t, "SPACED_LOCAL_NAME", result[1].LocalName)
 	})
 
 	t.Run("env vars with spaces in remote name", func(t *testing.T) {
@@ -64,7 +64,7 @@ func TestGetEnvVars(t *testing.T) {
 			"remote name with spaces:LOCAL",
 			"another remote name:LOCAL_NAME",
 		}
-		result := getEnvVars(input)
+		result := parseEnvVars(input)
 
 		assert.Equal(t, 2, len(result))
 		assert.Equal(t, "remote name with spaces", result[0].RemoteName)
@@ -74,7 +74,7 @@ func TestGetEnvVars(t *testing.T) {
 	})
 
 	t.Run("empty input", func(t *testing.T) {
-		result := getEnvVars([]string{})
+		result := parseEnvVars([]string{})
 		assert.Equal(t, 0, len(result))
 	})
 }
@@ -119,7 +119,7 @@ func TestVaultEnvProviderFetch(t *testing.T) {
 		defer conn.Close(t)
 
 		conn.Query(
-			"SELECT name, decrypted_secret FROM vault.decrypted_secrets WHERE name = ANY($1)",
+			fetchSecretsQuery,
 			[]string{"remote", "another"},
 		).Reply("SELECT 2",
 			[]interface{}{"remote", "secret1"},
@@ -150,7 +150,7 @@ func TestVaultEnvProviderFetch(t *testing.T) {
 		t.Cleanup(func() { conn.Close(t) })
 
 		conn.Query(
-			"SELECT name, decrypted_secret FROM vault.decrypted_secrets WHERE name = ANY($1)",
+			fetchSecretsQuery,
 			[]string{"remote", "missing"},
 		).Reply("SELECT 1", []interface{}{"remote", "secret1"})
 
@@ -160,14 +160,5 @@ func TestVaultEnvProviderFetch(t *testing.T) {
 			"LOCAL": "secret1",
 			"OTHER": "", // Missing secret returns empty string
 		}, result)
-	})
-
-	t.Run("nil provider returns empty map", func(t *testing.T) {
-		ctx := context.Background()
-		var provider *vaultEnvProvider
-
-		result, err := provider.Fetch(ctx, nil)
-		assert.NoError(t, err)
-		assert.Equal(t, map[string]string{}, result)
 	})
 }

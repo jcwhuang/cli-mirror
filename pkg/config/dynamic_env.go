@@ -2,6 +2,8 @@ package config
 
 import (
 	"context"
+	"fmt"
+	"os"
 	"strings"
 
 	"github.com/jackc/pgx/v4"
@@ -22,42 +24,34 @@ type (
 	}
 )
 
+const (
+	fetchSecretsQuery = `SELECT name, decrypted_secret FROM vault.decrypted_secrets WHERE name = ANY($1)`
+)
+
 // Get a list of env variables with possible renames like so:
 // "some_env:RENAME_NAME"
 // And extract them all in a structured { remoteName: "some_env", local_name: "RENAME_NAME" }
-func getEnvVars(EnvVars []string) []structuredEnv {
+func parseEnvVars(EnvVars []string) []structuredEnv {
 	result := make([]structuredEnv, len(EnvVars))
 
 	for i, envVar := range EnvVars {
-		// Find first : that's not escaped with \
-		colonIndex := -1
-		for j := 0; j < len(envVar); j++ {
-			if envVar[j] == ':' && (j == 0 || envVar[j-1] != '\\') {
-				colonIndex = j
-				break
-			}
-		}
+		// Find last colon
+		colonIndex := strings.LastIndex(envVar, ":")
 
 		if colonIndex > 0 {
 			// Has rename format "remote:local"
 			remoteName := envVar[:colonIndex]
 			localName := envVar[colonIndex+1:]
 
-			// Unescape any \: in both names
-			remoteName = strings.ReplaceAll(remoteName, "\\:", ":")
-			localName = strings.ReplaceAll(localName, "\\:", ":")
-
 			result[i] = structuredEnv{
 				RemoteName: remoteName,
 				LocalName:  localName,
 			}
 		} else {
-			// No rename or escaped :, use same name for both
-			// Unescape any \: in the name
-			name := strings.ReplaceAll(envVar, "\\:", ":")
+			// No rename, use same name for both
 			result[i] = structuredEnv{
-				RemoteName: name,
-				LocalName:  name,
+				RemoteName: envVar,
+				LocalName:  envVar,
 			}
 		}
 	}
@@ -65,9 +59,26 @@ func getEnvVars(EnvVars []string) []structuredEnv {
 	return result
 }
 
-// func (d *dynamic_env) Fetch(ctx context.Context) (map[string]string, error) {
-// 	return d.Vault.fetch(ctx)
-// }
+func setDefaultEnvValues(envs []structuredEnv, defaultValue string) error {
+	// Set default values for any unset env vars
+	for _, envVar := range envs {
+		if os.Getenv(envVar.LocalName) == "" {
+			if err := os.Setenv(envVar.LocalName, defaultValue); err != nil {
+				return fmt.Errorf("failed to set default env var %s: %w", envVar.LocalName, err)
+			}
+		}
+	}
+	return nil
+}
+
+func SetEnvValues(envs map[string]string) error {
+	for envName, envValue := range envs {
+		if err := os.Setenv(envName, envValue); err != nil {
+			return fmt.Errorf("failed to set default env var %s: %w", envName, err)
+		}
+	}
+	return nil
+}
 
 func (d *dynamic_env) validate() error {
 	if err := d.Vault.validate(); err != nil {
@@ -80,15 +91,12 @@ func (v *vaultEnvProvider) validate() error {
 	if v == nil {
 		return nil
 	}
-	v.StructuredEnvVars = getEnvVars(v.EnvVars)
+	v.StructuredEnvVars = parseEnvVars(v.EnvVars)
+	setDefaultEnvValues(v.StructuredEnvVars, "dynamic-env-from-vault")
 	return nil
 }
 
 func (v *vaultEnvProvider) Fetch(ctx context.Context, conn *pgx.Conn) (map[string]string, error) {
-	if v == nil {
-		return map[string]string{}, nil
-	}
-
 	result := make(map[string]string, len(v.StructuredEnvVars))
 
 	// Build list of remote names to query
@@ -98,7 +106,7 @@ func (v *vaultEnvProvider) Fetch(ctx context.Context, conn *pgx.Conn) (map[strin
 	}
 
 	// Query vault for all secrets in one batch
-	rows, err := conn.Query(ctx, `SELECT name, decrypted_secret FROM vault.decrypted_secrets WHERE name = ANY($1)`, remoteNames)
+	rows, err := conn.Query(ctx, fetchSecretsQuery, remoteNames)
 	if err != nil {
 		return nil, err
 	}
@@ -113,15 +121,13 @@ func (v *vaultEnvProvider) Fetch(ctx context.Context, conn *pgx.Conn) (map[strin
 		}
 		secrets[name] = secret
 	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("failed to parse rows: %w", err)
+	}
 
 	// Map remote secrets to local env var names
 	for _, envVar := range v.StructuredEnvVars {
-		if secret, ok := secrets[envVar.RemoteName]; ok {
-			result[envVar.LocalName] = secret
-		} else {
-			// Secret not found in vault
-			result[envVar.LocalName] = ""
-		}
+		result[envVar.LocalName] = secrets[envVar.RemoteName]
 	}
 
 	return result, nil
