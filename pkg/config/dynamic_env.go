@@ -25,6 +25,7 @@ type (
 )
 
 const (
+	// #nosec G101 -- This is a SQL query string, not a credential
 	fetchSecretsQuery = `SELECT name, decrypted_secret FROM vault.decrypted_secrets WHERE name = ANY($1)`
 )
 
@@ -92,7 +93,9 @@ func (v *vaultEnvProvider) validate() error {
 		return nil
 	}
 	v.StructuredEnvVars = parseEnvVars(v.EnvVars)
-	setDefaultEnvValues(v.StructuredEnvVars, "dynamic-env-from-vault")
+	if err := setDefaultEnvValues(v.StructuredEnvVars, "dynamic-env-from-vault"); err != nil {
+		return err
+	}
 	return nil
 }
 
