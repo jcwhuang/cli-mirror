@@ -5,11 +5,9 @@ import "math"
 // UintToInt converts a uint to an int, handling potential overflow
 func UintToInt(value uint) int {
 	if value <= math.MaxInt {
-		result := int(value)
-		return result
+		return int(value)
 	}
-	maxInt := math.MaxInt
-	return maxInt
+	return math.MaxInt
 }
 
 // IntToUint converts an int to a uint, handling negative values
@@ -36,4 +34,11 @@ func IntToUintPtr(value *int) *uint {
 
 func Ptr[T any](v T) *T {
 	return &v
+}
+
+func Val[T any](v *T, def T) T {
+	if v == nil {
+		return def
+	}
+	return *v
 }
